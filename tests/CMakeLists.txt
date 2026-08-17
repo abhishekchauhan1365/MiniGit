@@ -8,6 +8,19 @@ FetchContent_MakeAvailable(googletest)
 add_executable(mgit_tests
     FileSystemTest.cpp
     RepositoryTest.cpp
+    SHA1Test.cpp
+    BlobTest.cpp
+    CommitTest.cpp
+    TreeTest.cpp
+    IndexTest.cpp
+    ObjectDatabaseTest.cpp
+    ParserTest.cpp
+    InitCommandTest.cpp
+    AddCommandTest.cpp
+    CommitCommandTest.cpp
+    LogCommandTest.cpp
+    BranchCommandTest.cpp
+    HashObjectCommandTest.cpp
 )
 
 target_link_libraries(mgit_tests PRIVATE minigit_core gtest_main)
