@@ -1,0 +1,17 @@
+# MiniGit Database
+.mgit/
+
+# CMake / Build
+build/
+cmake-build-debug/
+cmake-build-release/
+out/
+.vs/
+*.obj
+*.exe
+*.dll
+*.lib
+
+# Python caches
+__pycache__/
+*.pyc
