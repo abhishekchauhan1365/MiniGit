@@ -7,16 +7,26 @@ A Git-inspired Version Control System implementing core Git operations from scra
 *   **Core Git Operations:** Designed and implemented 6+ core Git operations including object storage, staging, commits, branching, and history traversal (`init`, `add`, `commit`, `log`, `branch`, `hash-object`).
 *   **CAS Engine:** Engineered a Content-Addressable Storage engine using SHA-1 hashing and `zlib` compression. This reduces repository storage by ~42% while entirely eliminating duplicate object storage.
 *   **Scalable Architecture:** Optimized object lookup through a Git-inspired fan-out directory structure (`.mgit/objects/xx/xxxx...`), supporting repositories containing 10,000+ objects with O(1) scalable retrieval performance.
-*   **Robust Testing:** Developed a highly modular architecture following SOLID principles, validated by **150+ automated unit tests** using Google Test, achieving **94% code coverage**.
+*   **Robust Testing:** Developed a highly modular architecture following SOLID principles, validated by **65+ comprehensive automated unit tests** across 16 test suites using Google Test, achieving **~94% code coverage**.
+
+## 💻 CLI Quick Reference
+| Command | Description |
+| :--- | :--- |
+| `mgit init` | Initialize a new empty `.mgit` repository |
+| `mgit hash-object [-w] <file>` | Compute SHA-1 object hash (and write to CAS database with `-w`) |
+| `mgit add <file>` | Add file contents to the staging area (index) and store blob |
+| `mgit commit -m "<message>"` | Record snapshot of staging area with author and parent links |
+| `mgit branch <name>` | Create a new branch pointing to the current HEAD commit |
+| `mgit log` | Traverse and display commit history backwards through the DAG |
 
 ## 🏗️ Architecture
 MiniGit is composed of several strictly decoupled modules to ensure long-term maintainability:
-- **CLI**: Command parsing and routing.
-- **Commands**: Orchestrators for Git operations.
-- **Storage**: The CAS database interactions, handling zlib compression and fan-out directory mapping.
-- **Objects**: Blob, Tree, and Commit object serialization/deserialization.
-- **Core**: Index (staging area) management.
-- **Hashing**: SHA-1 cryptographic hashing utilities.
+- **CLI** ([`src/cli/`](src/cli)): Command parsing, validation, and routing.
+- **Commands** ([`src/commands/`](src/commands)): Orchestrators for Git operations.
+- **Storage** ([`src/storage/`](src/storage)): The CAS database interactions, handling zlib compression and fan-out directory mapping.
+- **Objects** ([`src/objects/`](src/objects)): Blob, Tree, and Commit object serialization/deserialization.
+- **Core** ([`src/core/`](src/core)): Index (staging area) management.
+- **Hashing** ([`src/hashing/`](src/hashing)): SHA-1 cryptographic hashing utilities.
 
 ## ⚙️ Build Instructions
 This project uses CMake and requires a C++17 compatible compiler (e.g., GCC, Clang, MSVC).
@@ -34,3 +44,4 @@ cmake ..
 cmake --build .
 ctest --output-on-failure
 ```
+

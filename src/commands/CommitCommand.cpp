@@ -7,6 +7,7 @@
 #include <iostream>
 #include <fstream>
 #include <filesystem>
+#include <cstdlib>
 
 namespace minigit::commands {
 
@@ -46,7 +47,19 @@ int CommitCommand::execute(const std::string& message) {
     }
 
     // 3. Write Commit
-    objects::Commit commit(treeHash, parentHash, "MiniGit User <user@example.com>", message);
+    std::string author = "MiniGit User <user@example.com>";
+    const char* envAuthor = std::getenv("MGIT_AUTHOR");
+    if (envAuthor && std::string(envAuthor).length() > 0) {
+        author = envAuthor;
+    } else {
+        const char* envName = std::getenv("MGIT_AUTHOR_NAME");
+        const char* envEmail = std::getenv("MGIT_AUTHOR_EMAIL");
+        if (envName && envEmail) {
+            author = std::string(envName) + " <" + envEmail + ">";
+        }
+    }
+
+    objects::Commit commit(treeHash, parentHash, author, message);
     std::string commitHash = storage::ObjectDatabase::writeObject(commit, true);
 
     // 4. Update Branch Ref

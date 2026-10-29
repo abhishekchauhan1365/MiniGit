@@ -12,6 +12,14 @@ out/
 *.dll
 *.lib
 
+# IDE & Editor files
+.vscode/
+.idea/
+
+# Scratch & temporary files
+*.tmp
+*.log
+
 # Python caches
 __pycache__/
 *.pyc
