@@ -87,7 +87,7 @@ class DagVisualizer {
         const headCommit = engine.getHeadCommitHash();
         const currentBranch = engine.getCurrentBranch();
 
-        // Traverse all commits into commitsMap
+        // Traverse all commits reachable from branches
         for (const startHash of engine.branches.values()) {
             let cur = startHash;
             while (cur && !commitsMap.has(cur)) {
@@ -95,7 +95,7 @@ class DagVisualizer {
                 if (!obj || obj.type !== "commit") break;
 
                 const parentMatch = obj.data.match(/^parent ([a-f0-9]{40})/m);
-                const authorMatch = obj.data.match(/^author ([^<]+<[^>]+>)/m);
+                const authorMatch = obj.data.match(/^author ([^\n<]+(?:<[^>]+>)?)/m);
                 const dateMatch = obj.data.match(/^author [^<]+<[^>]+> (\d+)/m);
                 const msgSplit = obj.data.split("\n\n");
                 const message = msgSplit.slice(1).join("\n\n").trim();
@@ -107,13 +107,35 @@ class DagVisualizer {
                     shortHash: cur.substring(0, 7),
                     parent,
                     children: [],
-                    author: authorMatch ? authorMatch[1] : "Unknown",
+                    author: authorMatch ? authorMatch[1].trim() : "Unknown",
                     timestamp: dateMatch ? new Date(parseInt(dateMatch[1]) * 1000) : new Date(),
                     message,
                     branchNames: branchTips.get(cur) || []
                 });
 
                 cur = parent;
+            }
+        }
+
+        // Also discover any additional commit objects stored in CAS
+        for (const obj of engine.objects.values()) {
+            if (obj.type === "commit" && !commitsMap.has(obj.hash)) {
+                const parentMatch = obj.data.match(/^parent ([a-f0-9]{40})/m);
+                const authorMatch = obj.data.match(/^author ([^\n<]+(?:<[^>]+>)?)/m);
+                const dateMatch = obj.data.match(/^author [^<]+<[^>]+> (\d+)/m);
+                const msgSplit = obj.data.split("\n\n");
+                const message = msgSplit.slice(1).join("\n\n").trim();
+
+                commitsMap.set(obj.hash, {
+                    hash: obj.hash,
+                    shortHash: obj.hash.substring(0, 7),
+                    parent: parentMatch ? parentMatch[1] : null,
+                    children: [],
+                    author: authorMatch ? authorMatch[1].trim() : "Unknown",
+                    timestamp: dateMatch ? new Date(parseInt(dateMatch[1]) * 1000) : new Date(),
+                    message,
+                    branchNames: branchTips.get(obj.hash) || []
+                });
             }
         }
 
@@ -127,9 +149,11 @@ class DagVisualizer {
         }
 
         // 2. Assign Lanes and Coordinates (Topological Layout)
-        // Root commits at bottom or left. Let's do a top-to-bottom or left-to-right graph.
-        // A clean vertical flow (latest at top, root at bottom) is standard and readable:
-        const sortedCommits = Array.from(commitsMap.values()).sort((a, b) => b.timestamp - a.timestamp);
+        const sortedCommits = Array.from(commitsMap.values()).sort((a, b) => {
+            if (a.parent === b.hash) return -1;
+            if (b.parent === a.hash) return 1;
+            return (b.timestamp || 0) - (a.timestamp || 0);
+        });
 
         const lanes = []; // commitHash -> laneIndex
         const commitPositions = new Map(); // commitHash -> {x, y, lane}

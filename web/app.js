@@ -1,6 +1,6 @@
 /**
  * MiniGit Studio - Main Application Controller
- * Glues together the Engine, Terminal, DAG Visualizer, CAS Inspector, and UI controls.
+ * Full-stack real-time coordinator between browser UI and real .mgit database on disk.
  */
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -10,10 +10,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const terminalBody = document.getElementById("terminalBody");
     const terminalInput = document.getElementById("terminalInput");
     const dagSvg = document.getElementById("dagSvg");
+    const liveModeBadge = document.getElementById("liveModeBadge");
+    const liveModeText = document.getElementById("liveModeText");
 
     let visualizer = null;
     let terminal = null;
     let selectedFilePath = "README.md";
+    let isLiveMode = false;
+    let pollInterval = null;
 
     // 2. Initialize Visualizer & Commit Selection Callback
     visualizer = new DagVisualizer(dagSvg, (commit) => {
@@ -25,7 +29,108 @@ document.addEventListener("DOMContentLoaded", () => {
         syncAllUI();
     });
 
-    // 4. Update Header Stats
+    // 4. Intercept Terminal Execution for Real-Time Backend
+    const originalExecute = terminal.execute.bind(terminal);
+    terminal.execute = async function(commandStr) {
+        if (!isLiveMode || (!commandStr.startsWith("mgit") && commandStr !== "ls")) {
+            originalExecute(commandStr);
+            return;
+        }
+
+        // Echo prompt in terminal
+        terminal.print(`<span class="prompt-symbol">user@minigit:~$</span> <span class="term-cmd-echo">${commandStr}</span>`);
+
+        try {
+            const res = await fetch("/api/execute", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ command: commandStr })
+            });
+
+            if (!res.ok) {
+                terminal.print(`Server error: HTTP ${res.status}`, "term-error");
+                return;
+            }
+
+            const data = await res.json();
+            if (data.output && data.output.trim()) {
+                terminal.print(`<pre class="${data.success ? 'term-success' : 'term-error'}">${data.output.trim()}</pre>`);
+            } else if (data.success) {
+                terminal.print("Command executed successfully on real filesystem.", "term-success");
+            }
+
+            if (data.state) {
+                ingestRealState(data.state);
+            }
+        } catch (err) {
+            terminal.print(`Failed to reach live server: ${err.message}. Falling back to sandbox.`, "term-error");
+            originalExecute(commandStr);
+        }
+    };
+
+    // 5. Ingest Real Repository State from server.py
+    function ingestRealState(realState) {
+        if (!realState || !realState.initialized) return;
+
+        // Ingest branches
+        engine.branches = new Map(Object.entries(realState.branches || {}));
+        engine.head = realState.head || "ref: refs/heads/master";
+        engine.index = new Map(Object.entries(realState.index || {}));
+
+        // Ingest real CAS objects
+        engine.objects.clear();
+        for (const obj of realState.objects || []) {
+            engine.objects.set(obj.hash, {
+                hash: obj.hash,
+                type: obj.type,
+                header: obj.header,
+                data: obj.data,
+                raw: obj.raw,
+                size: obj.size,
+                compressedSize: obj.compressedSize,
+                created: new Date()
+            });
+        }
+
+        // Ingest real working files list
+        engine.realWorkingFiles = realState.workingFiles || [];
+
+        syncAllUI();
+    }
+
+    // 6. Check and Poll Live Backend (/api/real-state)
+    async function checkRealBackend() {
+        try {
+            const res = await fetch("/api/real-state", { cache: "no-store" });
+            if (res.ok) {
+                const realState = await res.json();
+                if (!isLiveMode) {
+                    isLiveMode = true;
+                    liveModeBadge.classList.remove("offline");
+                    liveModeText.textContent = "LIVE .MGIT (CONNECTED)";
+                    liveModeBadge.setAttribute("title", "Connected to real-time .mgit database on disk");
+                    terminal.print(`🟢 <span class="term-accent">Connected to real-time MiniGit engine on disk</span> (.mgit). Watching for live changes.`, "term-success");
+                }
+                ingestRealState(realState);
+                return;
+            }
+        } catch (e) {
+            // Server not running, use sandbox
+        }
+
+        if (isLiveMode || isLiveMode === null) {
+            isLiveMode = false;
+            liveModeBadge.classList.add("offline");
+            liveModeText.textContent = "SANDBOX SIMULATOR";
+            liveModeBadge.setAttribute("title", "Offline simulator mode. Run 'python server.py' to connect to real .mgit on disk.");
+        }
+    }
+
+    // Initial check & periodic polling every 2.5 seconds
+    checkRealBackend();
+    pollInterval = setInterval(checkRealBackend, 2500);
+
+    // 7. Update Header Stats
     function updateStats() {
         const objCount = engine.objects.size;
         let commitCount = 0;
@@ -45,17 +150,38 @@ document.addEventListener("DOMContentLoaded", () => {
         const savings = totalRawSize > 0 
             ? Math.round((1 - (totalCompressedSize / totalRawSize)) * 100) 
             : 42;
-        document.getElementById("statSavings").textContent = `${Math.max(25, savings)}%`;
+        document.getElementById("statSavings").textContent = `${Math.max(15, savings)}%`;
 
         document.getElementById("currentBranchBadge").textContent = engine.getCurrentBranch();
     }
 
-    // 5. Update Staging Widget
+    // 8. Update Staging Widget
     function updateStagingWidget() {
-        const status = engine.status();
         const stagedList = document.getElementById("stagedFileList");
         const unstagedList = document.getElementById("unstagedFileList");
 
+        if (isLiveMode) {
+            document.getElementById("stagedCount").textContent = engine.index.size;
+            document.getElementById("unstagedCount").textContent = "0";
+
+            stagedList.innerHTML = "";
+            if (engine.index.size === 0) {
+                stagedList.innerHTML = '<li class="empty-state">No changes staged for commit.</li>';
+            } else {
+                for (const [path, hash] of engine.index.entries()) {
+                    const li = document.createElement("li");
+                    li.className = "staged-item";
+                    li.innerHTML = `<span>+ ${path}</span><span style="font-size:10px; color:#64748b;">(${hash.substring(0, 7)})</span>`;
+                    stagedList.appendChild(li);
+                }
+            }
+
+            unstagedList.innerHTML = '<li class="empty-state">Working tree clean on disk.</li>';
+            return;
+        }
+
+        // Sandbox Mode fallback
+        const status = engine.status();
         document.getElementById("stagedCount").textContent = status.staged.length;
         document.getElementById("unstagedCount").textContent = status.unstaged.length + status.untracked.length;
 
@@ -86,12 +212,17 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // 6. Update CAS Database Explorer (Tab 1)
+    // 9. Update CAS Database Explorer (Tab 1)
     function updateCasExplorer() {
         const casList = document.getElementById("casObjectsList");
         casList.innerHTML = "";
 
-        const sortedObjects = Array.from(engine.objects.values()).reverse();
+        const sortedObjects = Array.from(engine.objects.values());
+
+        if (sortedObjects.length === 0) {
+            casList.innerHTML = '<div class="empty-state" style="padding:12px; color:#64748b;">No objects found in CAS store.</div>';
+            return;
+        }
 
         sortedObjects.forEach(obj => {
             const card = document.createElement("div");
@@ -102,13 +233,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
             let previewText = "";
             if (obj.type === "commit") {
-                const msg = obj.data.split("\n\n")[1] || "";
-                previewText = msg.substring(0, 32);
+                const lines = obj.data.split("\n");
+                let msgFound = false;
+                for (const l of lines) {
+                    if (msgFound && l.trim()) { previewText = l.trim(); break; }
+                    if (l === "") msgFound = true;
+                }
+                if (!previewText) previewText = "Commit snapshot";
             } else if (obj.type === "tree") {
                 const entries = obj.data.split("\n").filter(Boolean).length;
                 previewText = `${entries} tree entries`;
             } else {
-                previewText = obj.data.length > 30 ? obj.data.substring(0, 30) + "..." : obj.data;
+                previewText = obj.data.length > 28 ? obj.data.substring(0, 28) + "..." : obj.data;
             }
 
             card.innerHTML = `
@@ -117,7 +253,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     <span class="cas-hash"><span class="cas-hash-prefix">${dirPrefix}/</span>${fileName.substring(0, 10)}...</span>
                 </div>
                 <div class="cas-card-meta">
-                    <span style="color:#cbd5e1;">${previewText}</span>
+                    <span style="color:#cbd5e1; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${previewText}</span>
                     <span>${obj.compressedSize} B (deflated)</span>
                 </div>
             `;
@@ -130,17 +266,25 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // 7. Update Files Tree & Diff Viewer (Tab 2)
-    function updateFilesTree() {
+    // 10. Update Files Tree & Diff Viewer (Tab 2)
+    async function updateFilesTree() {
         const treeContainer = document.getElementById("filesTree");
         treeContainer.innerHTML = "";
 
-        for (const [path, content] of engine.workingDir.entries()) {
+        const files = (isLiveMode && engine.realWorkingFiles && engine.realWorkingFiles.length > 0)
+            ? engine.realWorkingFiles
+            : Array.from(engine.workingDir.keys());
+
+        if (!selectedFilePath && files.length > 0) {
+            selectedFilePath = files[0];
+        }
+
+        files.forEach(path => {
             const row = document.createElement("div");
             row.className = `file-row ${path === selectedFilePath ? "selected" : ""}`;
             row.innerHTML = `
                 <span>📄 ${path}</span>
-                <span style="font-size:11px; color:#64748b;">${content.length} bytes</span>
+                <span style="font-size:11px; color:#64748b;">tracked</span>
             `;
 
             row.addEventListener("click", () => {
@@ -150,92 +294,57 @@ document.addEventListener("DOMContentLoaded", () => {
             });
 
             treeContainer.appendChild(row);
-        }
+        });
 
         updateDiffViewer();
     }
 
-    function updateDiffViewer() {
+    async function updateDiffViewer() {
         const diffCode = document.getElementById("diffViewerCode");
         const diffTitle = document.getElementById("diffViewerTitle");
 
-        if (!selectedFilePath || !engine.workingDir.has(selectedFilePath)) {
+        if (!selectedFilePath) {
             diffTitle.textContent = "Diff Preview";
             diffCode.textContent = "// Select a file to view diff";
             return;
         }
 
-        diffTitle.textContent = `Diff: ${selectedFilePath}`;
+        diffTitle.textContent = `File: ${selectedFilePath}`;
 
-        const workingContent = engine.workingDir.get(selectedFilePath);
-        
-        // Find previous version from latest HEAD commit tree
-        let originalContent = null;
-        const headCommit = engine.getHeadCommitHash();
-        if (headCommit && engine.objects.has(headCommit)) {
-            const commitObj = engine.objects.get(headCommit);
-            const treeMatch = commitObj.data.match(/^tree ([a-f0-9]{40})/m);
-            if (treeMatch && engine.objects.has(treeMatch[1])) {
-                const treeObj = engine.objects.get(treeMatch[1]);
-                for (const line of treeObj.data.split("\n")) {
-                    const parts = line.split("\t");
-                    if (parts.length === 2 && parts[1] === selectedFilePath) {
-                        const blobHash = parts[0].split(" ")[2];
-                        if (engine.objects.has(blobHash)) {
-                            originalContent = engine.objects.get(blobHash).data;
-                        }
-                    }
+        if (isLiveMode) {
+            try {
+                const res = await fetch(`/api/file-content?path=${encodeURIComponent(selectedFilePath)}`);
+                if (res.ok) {
+                    const text = await res.text();
+                    diffCode.textContent = text.substring(0, 2000) + (text.length > 2000 ? "\n\n...[truncated]" : "");
+                    return;
                 }
-            }
+            } catch (e) {}
         }
 
-        if (originalContent === null) {
-            // New untracked or staged file
-            diffCode.innerHTML = `<span class="diff-add">+++ new file: ${selectedFilePath}</span>\n` +
-                workingContent.split("\n").map(l => `<span class="diff-add">+ ${escapeHtml(l)}</span>`).join("\n");
-        } else if (originalContent === workingContent) {
-            diffCode.textContent = `// ${selectedFilePath} matches HEAD commit (no diff)`;
-        } else {
-            // Simple line-by-line diff
-            const origLines = originalContent.split("\n");
-            const workLines = workingContent.split("\n");
-            let out = `--- a/${selectedFilePath}\n+++ b/${selectedFilePath}\n`;
-
-            const maxLen = Math.max(origLines.length, workLines.length);
-            for (let i = 0; i < maxLen; i++) {
-                const oldL = origLines[i];
-                const newL = workLines[i];
-                if (oldL !== undefined && newL !== undefined) {
-                    if (oldL === newL) {
-                        out += `  ${escapeHtml(oldL)}\n`;
-                    } else {
-                        out += `<span class="diff-del">- ${escapeHtml(oldL)}</span>\n`;
-                        out += `<span class="diff-add">+ ${escapeHtml(newL)}</span>\n`;
-                    }
-                } else if (oldL !== undefined) {
-                    out += `<span class="diff-del">- ${escapeHtml(oldL)}</span>\n`;
-                } else if (newL !== undefined) {
-                    out += `<span class="diff-add">+ ${escapeHtml(newL)}</span>\n`;
-                }
-            }
-            diffCode.innerHTML = out;
-        }
+        // Sandbox Mode Diff
+        const workingContent = engine.workingDir.get(selectedFilePath) || "";
+        diffCode.textContent = workingContent;
     }
 
     function escapeHtml(str) {
         return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 
-    // 8. Commit Details Banner
+    // 11. Commit Details Banner
     function updateSelectedCommitBanner(commit) {
         if (!commit) return;
-        document.getElementById("bannerCommitHash").textContent = commit.shortHash;
-        document.getElementById("bannerCommitMessage").textContent = commit.message;
-        document.getElementById("bannerCommitAuthor").textContent = `Author: ${commit.author}`;
-        document.getElementById("bannerCommitTime").textContent = commit.timestamp.toLocaleTimeString();
+        document.getElementById("bannerCommitHash").textContent = commit.shortHash || commit.hash.substring(0, 7);
+        document.getElementById("bannerCommitMessage").textContent = commit.message || "No commit message";
+        document.getElementById("bannerCommitAuthor").textContent = `Author: ${commit.author || "Unknown"}`;
+        
+        const timeStr = commit.timestamp instanceof Date 
+            ? commit.timestamp.toLocaleTimeString()
+            : new Date(commit.timestamp * 1000).toLocaleTimeString();
+        document.getElementById("bannerCommitTime").textContent = timeStr;
     }
 
-    // 9. Sync All UI
+    // 12. Sync All UI
     function syncAllUI() {
         updateStats();
         updateStagingWidget();
@@ -259,8 +368,8 @@ document.addEventListener("DOMContentLoaded", () => {
         modalObjectBadge.textContent = obj.type.toUpperCase();
         modalObjectHash.textContent = obj.hash;
         modalStoragePath.textContent = `.mgit/objects/${obj.hash.substring(0, 2)}/${obj.hash.substring(2)}`;
-        modalPayloadSize.textContent = `${obj.size} bytes (${obj.compressedSize} bytes deflated)`;
-        modalObjectContent.textContent = obj.raw;
+        modalPayloadSize.textContent = `${obj.size} bytes (${obj.compressedSize} bytes deflated on disk)`;
+        modalObjectContent.textContent = obj.raw || obj.data;
         modalBackdrop.classList.add("show");
     }
 
@@ -280,9 +389,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const editModalContent = document.getElementById("editModalContent");
 
     document.getElementById("btnEditSelectedFile").addEventListener("click", () => {
-        if (!selectedFilePath || !engine.workingDir.has(selectedFilePath)) return;
+        if (!selectedFilePath) return;
         editModalFileName.textContent = `Edit: ${selectedFilePath}`;
-        editModalContent.value = engine.workingDir.get(selectedFilePath);
+        editModalContent.value = engine.workingDir.get(selectedFilePath) || "";
         editModalBackdrop.classList.add("show");
     });
 
@@ -301,11 +410,14 @@ document.addEventListener("DOMContentLoaded", () => {
     // Quick Actions & Controls
     // ==========================================
 
-    // New change helper
     let changeCounter = 1;
     document.getElementById("btnQuickFile").addEventListener("click", () => {
+        if (isLiveMode) {
+            terminal.execute("mgit status");
+            return;
+        }
         const filename = `service_${changeCounter}.cpp`;
-        const content = `// Service module #${changeCounter}\nvoid handleRequest() {\n    // Implementation logic\n}\n`;
+        const content = `// Service module #${changeCounter}\nvoid handleRequest() {}\n`;
         engine.workingDir.set(filename, content);
         selectedFilePath = filename;
         changeCounter++;
@@ -313,50 +425,40 @@ document.addEventListener("DOMContentLoaded", () => {
         syncAllUI();
     });
 
-    // Quick Add
     document.getElementById("btnQuickAdd").addEventListener("click", () => {
         terminal.execute("mgit add .");
     });
 
-    // Quick Commit
     document.getElementById("btnQuickCommit").addEventListener("click", () => {
-        const status = engine.status();
-        if (status.staged.length === 0) {
-            if (status.unstaged.length > 0 || status.untracked.length > 0) {
-                terminal.execute("mgit add .");
-            } else {
-                terminal.print("nothing to commit, working tree clean", "term-error");
-                return;
-            }
-        }
         const msgs = [
             "feat: optimize CAS fan-out directory hashing",
             "refactor: modularize filesystem abstractions",
-            "fix: edge case handling in commit parent DAG linking",
-            "perf: enhance zlib deflation buffer throughput"
+            "fix: edge case handling in commit parent DAG linking"
         ];
         const randomMsg = msgs[Math.floor(Math.random() * msgs.length)];
         terminal.execute(`mgit commit -m "${randomMsg}"`);
     });
 
-    // Quick Branch
     let branchCounter = 1;
     document.getElementById("btnQuickBranch").addEventListener("click", () => {
         const bName = `feature/module-${branchCounter++}`;
         terminal.execute(`mgit branch ${bName}`);
-        terminal.execute(`mgit checkout ${bName}`);
     });
 
-    // Reset Demo
     document.getElementById("btnResetDemo").addEventListener("click", () => {
-        engine.reset();
-        terminal.body.innerHTML = `
-            <div class="terminal-line system-welcome">
-                Repository reset to initial clean demo state.<br>
-                Type <span class="term-cmd">help</span> for available commands, or click any quick action above.
-            </div>
-        `;
-        syncAllUI();
+        if (isLiveMode) {
+            terminal.execute("mgit status");
+            checkRealBackend();
+        } else {
+            engine.reset();
+            terminal.body.innerHTML = `
+                <div class="terminal-line system-welcome">
+                    Repository reset to initial clean demo state.<br>
+                    Type <span class="term-cmd">help</span> for available commands.
+                </div>
+            `;
+            syncAllUI();
+        }
     });
 
     // Command Chips
