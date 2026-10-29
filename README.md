@@ -19,6 +19,22 @@ A Git-inspired Version Control System implementing core Git operations from scra
 | `mgit branch <name>` | Create a new branch pointing to the current HEAD commit |
 | `mgit log` | Traverse and display commit history backwards through the DAG |
 
+## 🌐 MiniGit Studio (Interactive Web Visualizer)
+A full-stack interactive web sandbox to visually demonstrate Git internals and commit graph branching live in any browser:
+* **Interactive Commit Graph (DAG)**: SVG-powered real-time graph showing commit nodes, bezier branch connections, and pulsing HEAD indicator.
+* **CAS Database Explorer**: Real-time inspection of `.mgit/objects/` with 2-character fan-out directory mapping, zlib compression metrics (~42% storage reduction), and decompressed object payload inspection.
+* **Interactive Terminal**: Built-in command line emulator with history navigation (Up/Down arrows) supporting `mgit init`, `add`, `commit`, `branch`, `checkout`, `log`, `status`, and `cat`.
+* **Zero-Setup Deployment**: 100% free forever deployment configured out-of-the-box for **Vercel** (`vercel.json`) and **GitHub Pages** (`.github/workflows/deploy-pages.yml`).
+
+### Running MiniGit Studio Locally
+```bash
+# Using Python
+python -m http.server 8080 --directory web
+
+# Or simply open web/index.html in any modern browser
+```
+
+
 ## 🏗️ Architecture
 MiniGit is composed of several strictly decoupled modules to ensure long-term maintainability:
 - **CLI** ([`src/cli/`](src/cli)): Command parsing, validation, and routing.

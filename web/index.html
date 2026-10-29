@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiniGit Studio | Interactive Git Internals & DAG Visualizer</title>
+    <meta name="description" content="Explore Git internals, Content-Addressable Storage (CAS), Directed Acyclic Graphs (DAG), and staging mechanics in an interactive, real-time visual sandbox.">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="dark-theme">
+    <!-- Top Navigation Header -->
+    <header class="app-header" id="appHeader">
+        <div class="header-left">
+            <div class="brand-logo">
+                <svg class="git-logo-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="18" cy="18" r="3"></circle>
+                    <circle cx="6" cy="6" r="3"></circle>
+                    <path d="M6 9v12"></path>
+                    <path d="M18 9a9 9 0 0 1-9 9"></path>
+                </svg>
+                <div class="brand-titles">
+                    <div class="brand-name">MiniGit <span class="badge-studio">Studio</span></div>
+                    <div class="brand-subtitle">C++17 Git Internals & Visual DAG Sandbox</div>
+                </div>
+            </div>
+            <div class="stats-bar" id="statsBar">
+                <div class="stat-pill" title="Total unique immutable objects in CAS store">
+                    <span class="stat-label">Objects:</span>
+                    <span class="stat-value" id="statObjects">0</span>
+                </div>
+                <div class="stat-pill" title="Total commit snapshots in the DAG">
+                    <span class="stat-label">Commits:</span>
+                    <span class="stat-value" id="statCommits">0</span>
+                </div>
+                <div class="stat-pill" title="Active branches">
+                    <span class="stat-label">Branches:</span>
+                    <span class="stat-value" id="statBranches">0</span>
+                </div>
+                <div class="stat-pill highlight" title="Storage savings from Content-Addressable deduplication & zlib">
+                    <span class="stat-label">CAS Dedup:</span>
+                    <span class="stat-value" id="statSavings">42%</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="header-right">
+            <!-- Quick Actions Toolbar -->
+            <div class="quick-toolbar">
+                <button class="btn btn-secondary btn-sm" id="btnQuickFile" title="Create or modify a test file">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+                    New Change
+                </button>
+                <button class="btn btn-secondary btn-sm" id="btnQuickAdd" title="Stage all modified files to index">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    mgit add .
+                </button>
+                <button class="btn btn-primary btn-sm" id="btnQuickCommit" title="Create a snapshot commit">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"></circle><line x1="1.05" y1="12" x2="7" y2="12"></line><line x1="17.01" y1="12" x2="22.96" y2="12"></line></svg>
+                    Commit
+                </button>
+                <button class="btn btn-secondary btn-sm" id="btnQuickBranch" title="Create a new branch">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+                    Branch
+                </button>
+                <button class="btn btn-ghost btn-sm" id="btnResetDemo" title="Reset to initial clean demo state">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><polyline points="23 20 23 14 17 14"></polyline><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"></path></svg>
+                    Reset
+                </button>
+            </div>
+            <a href="https://github.com/abhishekchauhan1365/MiniGit" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm github-link" id="githubLink">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+                GitHub Repo
+            </a>
+        </div>
+    </header>
+
+    <!-- Main Workspace Container -->
+    <main class="main-workspace" id="mainWorkspace">
+        
+        <!-- Left Panel: Terminal & Staging Manager -->
+        <section class="panel panel-left" id="panelTerminal">
+            <div class="panel-header">
+                <div class="window-dots">
+                    <span class="dot red"></span>
+                    <span class="dot yellow"></span>
+                    <span class="dot green"></span>
+                </div>
+                <span class="panel-title">Interactive Terminal</span>
+                <span class="branch-indicator" id="currentBranchBadge">master</span>
+            </div>
+
+            <!-- Clickable Command Suggestions -->
+            <div class="command-chips" id="commandChips">
+                <button class="chip" data-cmd="mgit status">mgit status</button>
+                <button class="chip" data-cmd="mgit log">mgit log</button>
+                <button class="chip" data-cmd="mgit add .">mgit add .</button>
+                <button class="chip" data-cmd="mgit commit -m 'feat: update auth logic'">mgit commit</button>
+                <button class="chip" data-cmd="mgit branch feature/auth">mgit branch</button>
+                <button class="chip" data-cmd="help">help</button>
+            </div>
+
+            <!-- Terminal Output Window -->
+            <div class="terminal-body" id="terminalBody">
+                <div class="terminal-line system-welcome">
+                    Welcome to <span class="term-accent">MiniGit Studio</span>.
+                    Type <span class="term-cmd">help</span> for available commands, or click any quick action above.
+                </div>
+            </div>
+
+            <!-- Terminal Input Prompt -->
+            <form class="terminal-prompt-bar" id="terminalForm">
+                <span class="prompt-symbol">user@minigit:~$</span>
+                <input type="text" id="terminalInput" class="terminal-input" autocomplete="off" spellcheck="false" placeholder="Type mgit command..." autofocus>
+                <button type="submit" class="terminal-enter-btn" title="Execute command">↵</button>
+            </form>
+
+            <!-- Working Tree & Staging Index Widget -->
+            <div class="staging-widget" id="stagingWidget">
+                <div class="staging-header">
+                    <span class="widget-title">Working Tree & Staging Area</span>
+                    <span class="widget-subtitle">(.mgit/index)</span>
+                </div>
+                <div class="staging-lists">
+                    <div class="staging-box staged">
+                        <div class="staging-box-title">
+                            <span class="status-indicator-dot staged-dot"></span>
+                            Changes Staged for Commit (<span id="stagedCount">0</span>)
+                        </div>
+                        <ul class="file-list" id="stagedFileList">
+                            <li class="empty-state">No changes staged.</li>
+                        </ul>
+                    </div>
+                    <div class="staging-box unstaged">
+                        <div class="staging-box-title">
+                            <span class="status-indicator-dot unstaged-dot"></span>
+                            Working Tree Changes (<span id="unstagedCount">0</span>)
+                        </div>
+                        <ul class="file-list" id="unstagedFileList">
+                            <li class="empty-state">Working directory clean.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Center Panel: Interactive Commit DAG Visualizer -->
+        <section class="panel panel-center" id="panelDag">
+            <div class="panel-header">
+                <div class="panel-header-left">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><line x1="3" y1="12" x2="9" y2="12"></line><line x1="15" y1="12" x2="21" y2="12"></line></svg>
+                    <span class="panel-title">Commit Graph (DAG)</span>
+                    <span class="dag-info-hint">Click any commit to inspect snapshot</span>
+                </div>
+                <div class="panel-header-controls">
+                    <button class="icon-btn" id="btnZoomIn" title="Zoom In">+</button>
+                    <button class="icon-btn" id="btnZoomOut" title="Zoom Out">−</button>
+                    <button class="icon-btn" id="btnZoomFit" title="Fit to View">Fit</button>
+                </div>
+            </div>
+
+            <div class="dag-canvas-container" id="dagContainer">
+                <svg id="dagSvg" class="dag-svg" width="100%" height="100%">
+                    <defs>
+                        <marker id="arrow" viewBox="0 0 10 10" refX="28" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748b"/>
+                        </marker>
+                        <linearGradient id="edgeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#3b82f6"/>
+                            <stop offset="100%" stop-color="#8b5cf6"/>
+                        </linearGradient>
+                    </defs>
+                    <g id="dagEdgesGroup"></g>
+                    <g id="dagNodesGroup"></g>
+                </svg>
+            </div>
+
+            <!-- Commit Quick Details Banner at Bottom of DAG -->
+            <div class="selected-commit-bar" id="selectedCommitBar">
+                <div class="commit-bar-left">
+                    <span class="commit-hash-badge" id="bannerCommitHash">--</span>
+                    <span class="commit-message-title" id="bannerCommitMessage">Select a commit node above to inspect snapshot</span>
+                </div>
+                <div class="commit-bar-right">
+                    <span class="commit-author-text" id="bannerCommitAuthor">Author: --</span>
+                    <span class="commit-time-text" id="bannerCommitTime">--</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Panel: Internals, CAS Object Store & Inspector -->
+        <section class="panel panel-right" id="panelInspector">
+            <div class="tabs-header" id="inspectorTabs">
+                <button class="tab-btn active" data-tab="tabCas" id="tabBtnCas">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                    CAS Database
+                </button>
+                <button class="tab-btn" data-tab="tabFiles" id="tabBtnFiles">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+                    Files & Diff
+                </button>
+                <button class="tab-btn" data-tab="tabInternals" id="tabBtnInternals">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                    Git Architecture
+                </button>
+            </div>
+
+            <!-- Tab 1: CAS Object Database Explorer -->
+            <div class="tab-content active" id="tabCas">
+                <div class="cas-summary-banner">
+                    <div class="cas-folder-path">📁 .mgit/objects/</div>
+                    <div class="cas-desc">Content-Addressable Storage (Fan-out by first 2 SHA-1 chars)</div>
+                </div>
+
+                <div class="cas-objects-list" id="casObjectsList">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+
+            <!-- Tab 2: Working Files & Diffs -->
+            <div class="tab-content" id="tabFiles">
+                <div class="file-browser-header">
+                    <span class="file-header-title">Repository Files</span>
+                    <button class="btn btn-ghost btn-xs" id="btnEditSelectedFile">Edit File</button>
+                </div>
+                <div class="files-tree" id="filesTree">
+                    <!-- Virtual files list -->
+                </div>
+                <div class="diff-viewer-container">
+                    <div class="diff-viewer-header">
+                        <span id="diffViewerTitle">Diff Preview: working vs index</span>
+                    </div>
+                    <pre class="diff-viewer-code" id="diffViewerCode">// Select a file or make changes to view diff</pre>
+                </div>
+            </div>
+
+            <!-- Tab 3: Git Internals Architecture Guide -->
+            <div class="tab-content" id="tabInternals">
+                <div class="architecture-guide">
+                    <h3>How MiniGit Stores Data</h3>
+                    <div class="arch-card">
+                        <div class="arch-card-header">
+                            <span class="badge badge-blob">BLOB</span>
+                            <strong>File Content Storage</strong>
+                        </div>
+                        <p>Stores raw byte content compressed with <code>zlib</code>. Does not store filename, permissions, or path. Identical files across different directories share the exact same blob.</p>
+                    </div>
+
+                    <div class="arch-card">
+                        <div class="arch-card-header">
+                            <span class="badge badge-tree">TREE</span>
+                            <strong>Directory Structure</strong>
+                        </div>
+                        <p>Maps filenames and permissions to Blob hashes or nested Tree hashes. Represents directory states without duplicating content.</p>
+                    </div>
+
+                    <div class="arch-card">
+                        <div class="arch-card-header">
+                            <span class="badge badge-commit">COMMIT</span>
+                            <strong>Immutable Snapshot</strong>
+                        </div>
+                        <p>Points to a top-level Tree hash, parent commit hash(es), author info, timestamp, and message. Chains together into a Directed Acyclic Graph (DAG).</p>
+                    </div>
+
+                    <div class="arch-card">
+                        <div class="arch-card-header">
+                            <span class="badge badge-ref">REFS & HEAD</span>
+                            <strong>Branch Pointers</strong>
+                        </div>
+                        <p>A branch is simply a 41-byte text file in <code>.mgit/refs/heads/</code> containing the latest commit's SHA-1. <code>HEAD</code> points to the active branch.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal for Object Inspection -->
+    <div class="modal-backdrop" id="modalBackdrop">
+        <div class="modal-dialog" id="objectModal">
+            <div class="modal-header">
+                <div class="modal-title-wrap">
+                    <span class="badge" id="modalObjectBadge">BLOB</span>
+                    <span class="modal-object-hash" id="modalObjectHash">a3f9c2...</span>
+                </div>
+                <button class="modal-close-btn" id="modalCloseBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-meta-grid">
+                    <div class="meta-item">
+                        <span class="meta-label">Storage Path:</span>
+                        <span class="meta-value" id="modalStoragePath">.mgit/objects/xx/xxxx...</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Payload Size:</span>
+                        <span class="meta-value" id="modalPayloadSize">-- bytes</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Compression:</span>
+                        <span class="meta-value">zlib deflate (~42% ratio)</span>
+                    </div>
+                </div>
+
+                <div class="modal-section-title">Decompressed Object Payload & Headers</div>
+                <pre class="modal-code-block" id="modalObjectContent"></pre>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="modalFooterClose">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit File Modal -->
+    <div class="modal-backdrop" id="editModalBackdrop">
+        <div class="modal-dialog" id="editModal">
+            <div class="modal-header">
+                <div class="modal-title-wrap">
+                    <span class="panel-title" id="editModalFileName">Edit file</span>
+                </div>
+                <button class="modal-close-btn" id="editModalCloseBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <textarea id="editModalContent" class="edit-textarea" rows="12" spellcheck="false"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" id="editModalCancel">Cancel</button>
+                <button class="btn btn-primary" id="editModalSave">Save to Working Tree</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="engine.js"></script>
+    <script src="visualizer.js"></script>
+    <script src="terminal.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
